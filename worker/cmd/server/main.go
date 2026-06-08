@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"syscall"
 	"time"
 	"log/slog"
+	"pulse-parse/worker/internal/parser"
 )
 
 func main () {
@@ -25,8 +27,34 @@ func main () {
 		w.Write([]byte(`{"status":"healthy"}`))
 	})
 
-	// TODO: Register your asynchronous pipeline trigger endpoint here
-	// mux.HandleFunc("/api/v1/parse", parseHandler)
+	mux.HandleFunc("/api/v1/parse", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req parser.LabReport
+		err := json.NewDecoder(r.Body).Decode(&req)
+		if err != nil {
+			slog.Error("Failed to decode request body", "error", err)
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+
+		slog.Info("Processing lab report", "report_id", req.ID, "patient_id", req.PatientID)
+
+		
+		result, err := parser.ExtractAndAnalyze(req)
+		if err != nil {
+			slog.Error("Pipeline processing failure", "error", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(result)
+	})
 
 	server := &http.Server{
 		Addr:         ":8080",
